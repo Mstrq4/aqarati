@@ -1,0 +1,12 @@
+/home/ubuntu/aqarati/backend/target/debug/deps/sqlx-7c2ce5c29b76e97b.d: /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/lib.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/any/mod.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/macros/mod.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/ty_match.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/spec_error.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/lib.md /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/macros/test.md /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/any/install_drivers_note.md
+
+/home/ubuntu/aqarati/backend/target/debug/deps/libsqlx-7c2ce5c29b76e97b.rmeta: /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/lib.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/any/mod.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/macros/mod.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/ty_match.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/spec_error.rs /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/lib.md /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/macros/test.md /home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/any/install_drivers_note.md
+
+/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/lib.rs:
+/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/any/mod.rs:
+/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/macros/mod.rs:
+/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/ty_match.rs:
+/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/spec_error.rs:
+/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/lib.md:
+/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/macros/test.md:
+/home/ubuntu/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/sqlx-0.8.0/src/any/install_drivers_note.md:

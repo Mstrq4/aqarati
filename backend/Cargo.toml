@@ -1,0 +1,81 @@
+[package]
+name = "aqarati-backend"
+version = "0.1.0"
+edition = "2021"
+description = "Aqarati — Smart Real Estate Platform Backend (Rust + GraphQL)"
+
+[dependencies]
+# Web Framework
+actix-web = "4"
+actix-cors = "0.7"
+actix-rt = "2"
+
+# GraphQL
+async-graphql = { version = "7", features = ["chrono", "uuid", "dataloader"] }
+async-graphql-actix-web = "7"
+async-graphql-value = "7"
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "mysql", "uuid", "chrono", "json"] }
+deadpool-postgres = "0.14"
+deadpool-sqlite = "0.8"
+
+# Authentication
+jsonwebtoken = "9"
+argon2 = "0.5"
+hmac = "0.12"
+sha2 = "0.10"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-actix-web = "0.7"
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Chrono
+chrono = { version = "0.4", features = ["serde"] }
+
+# Config
+dotenv = "0.15"
+config = "0.14"
+
+# Regex
+regex = "1"
+lazy_static = "1.5"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Email
+lettre = { version = "0.11", features = ["tokio1-native-tls"] }
+
+# HTTP Client
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+
+# Image processing
+image = "0.25"
+
+# Miscellaneous
+base64 = "0.22"
+rand = "0.8"
+slug = "0.1"
+mime_guess = "2"
+
+[dev-dependencies]
+actix-test = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true

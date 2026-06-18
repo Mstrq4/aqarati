@@ -1,0 +1,22 @@
+{
+  "name": "aqarati",
+  "version": "1.0.0",
+  "private": true,
+  "description": "عقاراتي - Smart Real Estate Platform",
+  "workspaces": ["shared", "mobile", "admin", "web", "backend"],
+  "scripts": {
+    "dev:mobile": "cd mobile && npx react-native start",
+    "dev:admin": "cd admin && npm run dev",
+    "dev:web": "cd web && npm run dev",
+    "dev:backend": "cd backend && cargo run",
+    "build:mobile": "cd mobile && npx react-native build",
+    "build:admin": "cd admin && npm run build",
+    "build:web": "cd web && npm run build",
+    "build:backend": "cd backend && cargo build --release",
+    "lint": "npm run lint --workspaces",
+    "test": "npm run test --workspaces",
+    "db:migrate:pg": "cd backend && cargo run -- migrate postgres",
+    "db:migrate:mysql": "cd backend && cargo run -- migrate mysql",
+    "db:seed": "cd backend && cargo run -- seed"
+  }
+}

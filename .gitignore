@@ -1,0 +1,1 @@
+node_modules/\ntarget/\ndist/\n.env\n*.log\nmedia/uploads/*\n!media/uploads/.gitkeep\n.DS_Store

@@ -1,0 +1,1 @@
+cargo:rustc-env=MIME_TYPES_GENERATED_PATH=/home/ubuntu/aqarati/backend/target/release/build/mime_guess-3e47eb6b1ded483e/out/mime_types_generated.rs
