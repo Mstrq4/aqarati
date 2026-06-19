@@ -500,6 +500,33 @@ impl Mutation {
         })
     }
 
+    /// Request password reset (public endpoint)
+    async fn forgot_password(
+        &self,
+        ctx: &Context<'_>,
+        email: String,
+    ) -> Result<bool> {
+        let pool = ctx.data::<DbPool>()?;
+        AuthService::request_password_reset(pool, &email)
+            .await
+            .map_err(|e| async_graphql::Error::new(e))?;
+        Ok(true)
+    }
+
+    /// Reset password with token (public endpoint)
+    async fn reset_password(
+        &self,
+        ctx: &Context<'_>,
+        token: String,
+        new_password: String,
+    ) -> Result<bool> {
+        let pool = ctx.data::<DbPool>()?;
+        AuthService::reset_password(pool, &token, &new_password)
+            .await
+            .map_err(|e| async_graphql::Error::new(e))?;
+        Ok(true)
+    }
+
     /// Login
     async fn login(
         &self,

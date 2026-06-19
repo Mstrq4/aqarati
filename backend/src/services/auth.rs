@@ -605,4 +605,76 @@ impl AuthService {
             }
         }
     }
+
+    /// Request password reset — generates token and stores it
+    pub async fn request_password_reset(pool: &DbPool, email: &str) -> Result<(), String> {
+        match pool {
+            DbPool::Postgres(p) => {
+                let token = Uuid::new_v4();
+                let expiry = Utc::now() + Duration::hours(1);
+                sqlx::query(
+                    "INSERT INTO password_resets (email, token, expires_at) VALUES ($1, $2, $3) \
+                     ON CONFLICT (email) DO UPDATE SET token = $2, expires_at = $3"
+                ).bind(email).bind(token).bind(expiry)
+                .execute(p).await
+                .map_err(|e| format!("Password reset request failed: {}", e))?;
+                Ok(())
+            }
+            DbPool::Mysql(p) => {
+                let token = Uuid::new_v4();
+                let expiry = Utc::now() + Duration::hours(1);
+                sqlx::query(
+                    "INSERT INTO password_resets (email, token, expires_at) VALUES (?, ?, ?) \
+                     ON DUPLICATE KEY UPDATE token = ?, expires_at = ?"
+                ).bind(email).bind(token.to_string()).bind(expiry)
+                .bind(token.to_string()).bind(expiry)
+                .execute(p).await
+                .map_err(|e| format!("Password reset request failed: {}", e))?;
+                Ok(())
+            }
+        }
+    }
+
+    /// Reset password using valid token
+    pub async fn reset_password(pool: &DbPool, token: &str, new_password: &str) -> Result<(), String> {
+        match pool {
+            DbPool::Postgres(p) => {
+                let token_uuid = Uuid::parse_str(token).map_err(|_| "Invalid token".to_string())?;
+                let row = sqlx::query(
+                    "SELECT email FROM password_resets WHERE token = $1 AND expires_at > NOW()"
+                ).bind(token_uuid).fetch_optional(p).await
+                .map_err(|e| format!("Token lookup failed: {}", e))?;
+                
+                let email: String = row.ok_or("Invalid or expired token")?.try_get("email").map_err(|_| "Token error".to_string())?;
+                
+                let hash = Self::hash_password(new_password)?;
+                sqlx::query("UPDATE users SET password_hash = $1 WHERE email = $2")
+                    .bind(&hash).bind(&email)
+                    .execute(p).await
+                    .map_err(|e| format!("Password update failed: {}", e))?;
+                
+                sqlx::query("DELETE FROM password_resets WHERE email = $1")
+                    .bind(&email).execute(p).await.ok();
+                Ok(())
+            }
+            DbPool::Mysql(p) => {
+                let row = sqlx::query(
+                    "SELECT email FROM password_resets WHERE token = ? AND expires_at > NOW()"
+                ).bind(token).fetch_optional(p).await
+                .map_err(|e| format!("Token lookup failed: {}", e))?;
+                
+                let email: String = row.ok_or("Invalid or expired token")?.try_get("email").map_err(|_| "Token error".to_string())?;
+                
+                let hash = Self::hash_password(new_password)?;
+                sqlx::query("UPDATE users SET password_hash = ? WHERE email = ?")
+                    .bind(&hash).bind(&email)
+                    .execute(p).await
+                    .map_err(|e| format!("Password update failed: {}", e))?;
+                
+                sqlx::query("DELETE FROM password_resets WHERE email = ?")
+                    .bind(&email).execute(p).await.ok();
+                Ok(())
+            }
+        }
+    }
 }
