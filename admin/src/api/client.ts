@@ -484,3 +484,31 @@ export async function updateReportStatus(
     { id, status, resolution: resolution || null }
   );
 }
+
+// ─── Settings ──────────────────────────────────────────
+
+export interface SettingEntry {
+  key: string;
+  value: string;
+  updatedAt: string;
+}
+
+export async function fetchSettings(): Promise<SettingEntry[]> {
+  const data = await graphql<{ adminSettings: any[] }>(
+    `query AdminSettings { adminSettings { key value updatedAt } }`
+  );
+  return (data.adminSettings || []).map((s: any) => ({
+    key: s.key,
+    value: s.value,
+    updatedAt: s.updatedAt || s.updated_at || '',
+  }));
+}
+
+export async function updateSetting(key: string, value: string): Promise<SettingEntry> {
+  const data = await graphql<{ adminUpdateSetting: any }>(
+    `mutation UpdateSetting($key: String!, $value: String!) { adminUpdateSetting(key: $key, value: $value) { key value updatedAt } }`,
+    { key, value }
+  );
+  const s = data.adminUpdateSetting;
+  return { key: s.key, value: s.value, updatedAt: s.updatedAt || s.updated_at || '' };
+}

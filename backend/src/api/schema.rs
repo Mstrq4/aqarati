@@ -7,6 +7,10 @@ use serde::{Serialize, Deserialize};
 
 use crate::db::DbPool;
 use crate::services::auth::AuthService;
+use crate::services::contacts::ContactsService;
+use crate::services::billing::BillingService;
+use crate::services::search::SearchService;
+use crate::services::organization::OrganizationService;
 use crate::api::guards::auth_guard;
 use crate::api::admin_plans::{
     AdminPlanFilter, CreatePlanInput, UpdatePlanInput,
@@ -391,32 +395,158 @@ impl Query {
 
     /// Get organizations for current user
     async fn my_organizations(&self, ctx: &Context<'_>) -> Result<Vec<OrganizationResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(vec![])
+        let pool = ctx.data::<DbPool>()?;
+        let user_id = ctx.data_opt::<uuid::Uuid>().cloned()
+            .ok_or_else(|| async_graphql::Error::new("Authentication required"))?;
+        
+        match pool {
+            DbPool::Postgres(p) => {
+                let rows = sqlx::query(
+                    "SELECT o.id, o.name, om.role, \
+                     (SELECT COUNT(*) FROM organization_members m2 WHERE m2.organization_id = o.id AND m2.status = 'active') as member_count, \
+                     (SELECT COUNT(*) FROM properties pr WHERE pr.organization_id = o.id AND pr.status != 'deleted') as property_count \
+                     FROM organizations o \
+                     JOIN organization_members om ON o.id = om.organization_id \
+                     WHERE om.user_id = $1 AND om.status = 'active'"
+                )
+                .bind(user_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| async_graphql::Error::new(format!("Organizations: {}", e)))?;
+                
+                Ok(rows.into_iter().map(|row| OrganizationResponse {
+                    id: ID::from(row.try_get::<Uuid, _>("id").unwrap_or_default().to_string()),
+                    name: row.try_get("name").unwrap_or_default(),
+                    role: row.try_get("role").unwrap_or_default(),
+                    member_count: row.try_get::<i64, _>("member_count").unwrap_or(0) as i32,
+                    property_count: row.try_get::<i64, _>("property_count").unwrap_or(0) as i32,
+                }).collect())
+            }
+            DbPool::Mysql(p) => {
+                let rows = sqlx::query(
+                    "SELECT o.id, o.name, om.role, \
+                     (SELECT COUNT(*) FROM organization_members m2 WHERE m2.organization_id = o.id AND m2.status = 'active') as member_count, \
+                     (SELECT COUNT(*) FROM properties pr WHERE pr.organization_id = o.id AND pr.status != 'deleted') as property_count \
+                     FROM organizations o \
+                     JOIN organization_members om ON o.id = om.organization_id \
+                     WHERE om.user_id = ? AND om.status = 'active'"
+                )
+                .bind(user_id.to_string())
+                .fetch_all(p)
+                .await
+                .map_err(|e| async_graphql::Error::new(format!("Organizations: {}", e)))?;
+                
+                Ok(rows.into_iter().map(|row| OrganizationResponse {
+                    id: ID::from(row.try_get::<String, _>("id").unwrap_or_default()),
+                    name: row.try_get("name").unwrap_or_default(),
+                    role: row.try_get("role").unwrap_or_default(),
+                    member_count: row.try_get::<i64, _>("member_count").unwrap_or(0) as i32,
+                    property_count: row.try_get::<i64, _>("property_count").unwrap_or(0) as i32,
+                }).collect())
+            }
+        }
     }
 
     /// Get contacts for current user
     async fn my_contacts(&self, ctx: &Context<'_>) -> Result<Vec<ContactResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(vec![])
+        let pool = ctx.data::<DbPool>()?;
+        let user_id = ctx.data_opt::<uuid::Uuid>().cloned()
+            .ok_or_else(|| async_graphql::Error::new("Authentication required"))?;
+        
+        let contacts = ContactsService::list_for_user(pool, user_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e))?;
+        
+        Ok(contacts.into_iter().map(|c| ContactResponse {
+            id: ID::from(c.id.to_string()),
+            name: c.name,
+            phone: c.phone,
+            email: c.email,
+            contact_type: c.contact_type,
+        }).collect())
     }
 
     /// Get reminders for current user
     async fn my_reminders(&self, ctx: &Context<'_>) -> Result<Vec<ReminderResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(vec![])
+        let pool = ctx.data::<DbPool>()?;
+        let user_id = ctx.data_opt::<uuid::Uuid>().cloned()
+            .ok_or_else(|| async_graphql::Error::new("Authentication required"))?;
+        
+        match pool {
+            DbPool::Postgres(p) => {
+                let rows = sqlx::query(
+                    "SELECT id, title, due_at, completed, property_id FROM reminders WHERE user_id = $1 ORDER BY due_at ASC"
+                )
+                .bind(user_id)
+                .fetch_all(p)
+                .await
+                .map_err(|e| async_graphql::Error::new(format!("Reminders: {}", e)))?;
+                
+                Ok(rows.into_iter().map(|row| ReminderResponse {
+                    id: ID::from(row.try_get::<Uuid, _>("id").unwrap_or_default().to_string()),
+                    title: row.try_get("title").unwrap_or_default(),
+                    due_at: row.try_get::<DateTime<Utc>, _>("due_at")
+                        .map(|d| d.to_rfc3339()).unwrap_or_default(),
+                    completed: row.try_get("completed").unwrap_or(false),
+                    property_id: row.try_get::<Uuid, _>("property_id").ok().map(|id| ID::from(id.to_string())),
+                }).collect())
+            }
+            DbPool::Mysql(p) => {
+                let rows = sqlx::query(
+                    "SELECT id, title, due_at, completed, property_id FROM reminders WHERE user_id = ? ORDER BY due_at ASC"
+                )
+                .bind(user_id.to_string())
+                .fetch_all(p)
+                .await
+                .map_err(|e| async_graphql::Error::new(format!("Reminders: {}", e)))?;
+                
+                Ok(rows.into_iter().map(|row| ReminderResponse {
+                    id: ID::from(row.try_get::<String, _>("id").unwrap_or_default()),
+                    title: row.try_get("title").unwrap_or_default(),
+                    due_at: row.try_get::<DateTime<Utc>, _>("due_at")
+                        .map(|d| d.to_rfc3339()).unwrap_or_default(),
+                    completed: row.try_get::<i8, _>("completed").map(|v| v != 0).unwrap_or(false),
+                    property_id: row.try_get::<String, _>("property_id").ok().map(ID::from),
+                }).collect())
+            }
+        }
     }
 
     /// Get saved searches
     async fn my_saved_searches(&self, ctx: &Context<'_>) -> Result<Vec<SavedSearchResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(vec![])
+        let pool = ctx.data::<DbPool>()?;
+        let user_id = ctx.data_opt::<uuid::Uuid>().cloned()
+            .ok_or_else(|| async_graphql::Error::new("Authentication required"))?;
+        
+        let searches = SearchService::get_saved_searches(pool, user_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e))?;
+        
+        Ok(searches.into_iter().map(|s| SavedSearchResponse {
+            id: ID::from(s.id.to_string()),
+            name: s.name,
+            filters: s.filters,
+            notify: s.notify,
+        }).collect())
     }
 
     /// Get current subscription
     async fn my_subscription(&self, ctx: &Context<'_>) -> Result<Option<SubscriptionResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(None)
+        let pool = ctx.data::<DbPool>()?;
+        let user_id = ctx.data_opt::<uuid::Uuid>().cloned()
+            .ok_or_else(|| async_graphql::Error::new("Authentication required"))?;
+        
+        let sub = BillingService::get_subscription(pool, user_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e))?;
+        
+        Ok(sub.map(|s| SubscriptionResponse {
+            id: ID::from(s.id.to_string()),
+            plan_name: s.plan_name,
+            tier: s.tier,
+            status: s.status,
+            current_period_end: s.current_period_end,
+        }))
     }
 
     /// Admin: List all users (real DB query, safe fields, RBAC-protected)
@@ -473,8 +603,48 @@ impl Query {
         ctx: &Context<'_>,
         property_id: ID,
     ) -> Result<Vec<RatingResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(vec![])
+        let pool = ctx.data::<DbPool>()?;
+        let pid = Uuid::parse_str(&property_id.0)
+            .map_err(|e| async_graphql::Error::new(format!("Invalid property ID: {}", e)))?;
+        
+        match pool {
+            DbPool::Postgres(p) => {
+                let rows = sqlx::query(
+                    "SELECT id, property_id, score, review, created_at FROM ratings WHERE property_id = $1 ORDER BY created_at DESC"
+                )
+                .bind(pid)
+                .fetch_all(p)
+                .await
+                .map_err(|e| async_graphql::Error::new(format!("Ratings: {}", e)))?;
+                
+                Ok(rows.into_iter().map(|row| RatingResponse {
+                    id: ID::from(row.try_get::<Uuid, _>("id").unwrap_or_default().to_string()),
+                    property_id: ID::from(row.try_get::<Uuid, _>("property_id").unwrap_or_default().to_string()),
+                    score: row.try_get("score").unwrap_or(0),
+                    review: row.try_get("review").ok(),
+                    created_at: row.try_get::<DateTime<Utc>, _>("created_at")
+                        .map(|d| d.to_rfc3339()).unwrap_or_default(),
+                }).collect())
+            }
+            DbPool::Mysql(p) => {
+                let rows = sqlx::query(
+                    "SELECT id, property_id, score, review, created_at FROM ratings WHERE property_id = ? ORDER BY created_at DESC"
+                )
+                .bind(pid.to_string())
+                .fetch_all(p)
+                .await
+                .map_err(|e| async_graphql::Error::new(format!("Ratings: {}", e)))?;
+                
+                Ok(rows.into_iter().map(|row| RatingResponse {
+                    id: ID::from(row.try_get::<String, _>("id").unwrap_or_default()),
+                    property_id: ID::from(row.try_get::<String, _>("property_id").unwrap_or_default()),
+                    score: row.try_get::<i32, _>("score").unwrap_or(0),
+                    review: row.try_get("review").ok(),
+                    created_at: row.try_get::<DateTime<Utc>, _>("created_at")
+                        .map(|d| d.to_rfc3339()).unwrap_or_default(),
+                }).collect())
+            }
+        }
     }
 }
 

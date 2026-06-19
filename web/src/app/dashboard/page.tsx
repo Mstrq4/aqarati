@@ -1,107 +1,122 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { translations } from '@aqarati/shared';
-import Link from 'next/link';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { me, logout, fetchMySubscription, isAuthenticated, UserData, SubscriptionData } from '@/api/client';
 
-const GRAPHQL_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/graphql';
-
-function getToken() { return typeof window !== 'undefined' ? localStorage.getItem('aq-token') : null; }
-
-function useI18n() {
-  const [lang, setLang] = useState<'ar' | 'en'>('ar');
-  const t = (key: string) => {
-    const keys = key.split('.');
-    let val: any = translations[lang];
-    for (const k of keys) { val = val?.[k]; }
-    return val || key;
-  };
-  return { t, lang, setLang };
-}
-
-async function gql(query: string, variables?: any) {
-  const headers: any = { 'Content-Type': 'application/json' };
-  const token = getToken();
-  if (token) headers['Authorization'] = `Bearer ${token}`;
-  const res = await fetch(GRAPHQL_URL, { method: 'POST', headers, body: JSON.stringify({ query, variables }) });
-  const json = await res.json();
-  if (json.errors) throw new Error(json.errors[0].message);
-  return json.data;
-}
-
-export default function Dashboard() {
-  const { t, lang } = useI18n();
-  const [user, setUser] = useState<any>(null);
-  const [properties, setProperties] = useState<any[]>([]);
+export default function DashboardPage() {
+  const router = useRouter();
+  const [user, setUser] = useState<UserData | null>(null);
+  const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
   const [loading, setLoading] = useState(true);
-  const dir = lang === 'ar' ? 'rtl' : 'ltr';
 
   useEffect(() => {
-    if (!getToken()) {
-      window.location.href = '/login';
+    if (!isAuthenticated()) {
+      router.push('/login');
       return;
     }
+
     Promise.all([
-      gql('{ me { id email fullName language status } }'),
-      gql('{ myProperties(limit: 10) { id title propertyType purpose status createdAt priceAmount city } }'),
-    ]).then(([u, p]) => {
-      setUser(u?.me);
-      setProperties(p?.myProperties || []);
+      me().catch(() => null),
+      fetchMySubscription().catch(() => null),
+    ]).then(([userData, subData]) => {
+      setUser(userData);
+      setSubscription(subData);
       setLoading(false);
-    }).catch(() => setLoading(false));
-  }, []);
+      if (!userData) router.push('/login');
+    });
+  }, [router]);
+
+  const handleLogout = () => {
+    logout();
+    router.push('/login');
+  };
 
   if (loading) {
-    return <div className="flex items-center justify-center min-h-screen bg-[#020907]">
-      <div className="animate-spin w-8 h-8 border-2 border-[#10b981] border-t-transparent rounded-full" />
-    </div>;
+    return (
+      <div className="min-h-screen bg-[#020907] flex items-center justify-center">
+        <p className="text-gray-400 text-lg">جاري التحميل...</p>
+      </div>
+    );
   }
 
+  if (!user) return null;
+
   return (
-    <div className="min-h-screen bg-[#020907]" style={{ direction: dir }}>
-      <nav className="border-b border-white/[0.04] px-6 py-4 flex items-center justify-between">
-        <Link href="/dashboard" className="text-xl font-bold text-white">🏠 {t('common.app_name')}</Link>
-        <div className="flex items-center gap-4">
-          <span className="text-white/60 text-sm">{user?.fullName}</span>
-          <Link href="/dashboard/properties" className="text-white/60 hover:text-white text-sm">{t('property.my_properties')}</Link>
-          <button onClick={() => { localStorage.removeItem('aq-token'); window.location.href = '/'; }}
-            className="text-white/40 hover:text-white text-sm">{t('auth.sign_out')}</button>
+    <div className="min-h-screen bg-[#020907]">
+      {/* Header */}
+      <header className="border-b border-[#1e3028] bg-[#141f1a] p-4">
+        <div className="max-w-5xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h1 className="text-xl font-bold text-white">عقاراتي</h1>
+            <span className="text-emerald-400 text-sm">لوحة التحكم</span>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="text-gray-400 text-sm">{user.fullName || user.email}</span>
+            <button
+              onClick={handleLogout}
+              className="bg-red-900/30 border border-red-800 text-red-300 px-4 py-2 rounded-lg text-sm hover:bg-red-900/50 transition"
+            >
+              خروج
+            </button>
+          </div>
         </div>
-      </nav>
-      <main className="max-w-6xl mx-auto px-6 py-8">
-        <h1 className="text-2xl font-bold text-white mb-2">{t('dashboard.welcome')}{user?.fullName && `, ${user.fullName}`}</h1>
-        <p className="text-white/40 mb-8">{t('dashboard.overview')}</p>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <div className="rounded-2xl p-6 bg-[rgba(20,31,26,0.4)] border border-white/[0.04]">
-            <div className="text-3xl font-bold text-[#10b981]">{properties.length}</div>
-            <div className="text-white/40 text-sm mt-1">{t('property.my_properties')}</div>
-          </div>
-          <div className="rounded-2xl p-6 bg-[rgba(20,31,26,0.4)] border border-white/[0.04]">
-            <div className="text-3xl font-bold text-[#8b5cf6]">{user?.status === 'active' ? '✓' : '—'}</div>
-            <div className="text-white/40 text-sm mt-1">{t('common.status')}</div>
-          </div>
-          <Link href="/dashboard/properties/new" className="rounded-2xl p-6 bg-[rgba(20,31,26,0.4)] border border-white/[0.04] hover:border-[#10b981]/30 transition-all flex items-center justify-center">
-            <span className="text-[#10b981] text-sm font-medium">+ {t('property.add_new')}</span>
-          </Link>
+      </header>
+
+      {/* Content */}
+      <main className="max-w-5xl mx-auto p-4 pt-8">
+        {/* Welcome */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold text-white mb-1">
+            مرحباً، {user.fullName || 'مستخدم عقاراتي'}
+          </h2>
+          <p className="text-gray-400">هذه لوحة تحكم عقاراتك</p>
         </div>
 
-        <h2 className="text-lg font-bold text-white mb-4">{t('property.recent')}</h2>
-        {properties.length === 0 ? (
-          <div className="text-center p-8 text-white/30 rounded-2xl bg-[rgba(20,31,26,0.4)]">{t('common.no_results')}</div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {properties.map((p: any) => (
-              <div key={p.id} className="rounded-2xl p-5 bg-[rgba(20,31,26,0.4)] border border-white/[0.04] hover:border-[#10b981]/20 transition-all">
-                <div className="flex justify-between items-start mb-2">
-                  <h3 className="text-white font-medium">{p.title}</h3>
-                  <span className={`text-xs px-2 py-1 rounded-full ${p.status === 'active' ? 'bg-[#10b981]/20 text-[#10b981]' : 'bg-white/10 text-white/40'}`}>{p.status}</span>
-                </div>
-                <div className="text-white/30 text-sm">{p.propertyType} · {p.purpose} {p.priceAmount ? `· ${p.priceAmount} SAR` : ''}</div>
-              </div>
-            ))}
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+          <div className="bg-[#141f1a] border border-[#1e3028] rounded-xl p-6">
+            <p className="text-gray-400 text-sm mb-1">الباقة الحالية</p>
+            <p className="text-2xl font-bold text-emerald-400">
+              {subscription ? subscription.planName : 'مجانية'}
+            </p>
+            <p className="text-gray-500 text-xs mt-1">
+              {subscription ? subscription.tier : 'trial'}
+            </p>
           </div>
-        )}
+
+          <div className="bg-[#141f1a] border border-[#1e3028] rounded-xl p-6">
+            <p className="text-gray-400 text-sm mb-1">حالة الاشتراك</p>
+            <p className={`text-2xl font-bold ${subscription?.status === 'active' ? 'text-emerald-400' : 'text-yellow-400'}`}>
+              {subscription ? (subscription.status === 'active' ? 'نشط' : subscription.status === 'trial' ? 'تجريبي' : subscription.status) : 'لا يوجد'}
+            </p>
+            {subscription?.currentPeriodEnd && (
+              <p className="text-gray-500 text-xs mt-1">
+                ينتهي: {new Date(subscription.currentPeriodEnd).toLocaleDateString('ar-SA')}
+              </p>
+            )}
+          </div>
+
+          <div className="bg-[#141f1a] border border-[#1e3028] rounded-xl p-6">
+            <p className="text-gray-400 text-sm mb-1">الحساب</p>
+            <p className="text-2xl font-bold text-white">{user.email}</p>
+            <p className="text-gray-500 text-xs mt-1">
+              {user.status === 'active' ? 'مفعل ✅' : user.status}
+            </p>
+          </div>
+        </div>
+
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <a href="/properties" className="bg-[#141f1a] border border-[#1e3028] rounded-xl p-6 hover:border-emerald-500 transition group">
+            <h3 className="text-lg font-semibold text-white group-hover:text-emerald-400 transition">🏠 عقاراتي</h3>
+            <p className="text-gray-400 text-sm mt-1">عرض وإدارة عقاراتك</p>
+          </a>
+          <a href="/plans" className="bg-[#141f1a] border border-[#1e3028] rounded-xl p-6 hover:border-emerald-500 transition group">
+            <h3 className="text-lg font-semibold text-white group-hover:text-emerald-400 transition">💎 الباقات</h3>
+            <p className="text-gray-400 text-sm mt-1">ترقية باقتك وباقة مكتبك</p>
+          </a>
+        </div>
       </main>
     </div>
   );
