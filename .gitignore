@@ -1,0 +1,14 @@
+node_modules/
+target/
+dist/
+.next/
+.env
+*.log
+media/uploads/*
+!media/uploads/.gitkeep
+local-maven/
+android/app/build/
+android/build/
+android/.gradle/
+*.keystore
+.DS_Store
