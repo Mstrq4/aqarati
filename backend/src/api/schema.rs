@@ -320,7 +320,25 @@ impl Query {
         }
     }
 
-    /// Admin: List reports
+    /// Admin: Get platform settings
+    async fn admin_settings(&self, ctx: &Context<'_>) -> Result<Vec<SettingEntry>> {
+        let pool = ctx.data::<DbPool>()?;
+        auth_guard::require_admin_user(ctx, pool).await?;
+        match pool {
+            DbPool::Postgres(p) => {
+                let rows = sqlx::query("SELECT key, value, updated_at FROM platform_settings ORDER BY key")
+                    .fetch_all(p).await.map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(rows.iter().map(|r| SettingEntry {
+                    key: r.try_get("key").unwrap_or_default(),
+                    value: r.try_get("value").unwrap_or_default(),
+                    updated_at: r.try_get::<DateTime<Utc>, _>("updated_at").map(|d| d.to_rfc3339()).unwrap_or_default(),
+                }).collect())
+            }
+            DbPool::Mysql(_) => Ok(vec![]),
+        }
+    }
+
+    /// Admin: Reports
     async fn admin_reports(
         &self,
         ctx: &Context<'_>,
@@ -498,6 +516,26 @@ impl Mutation {
                 status: result.status,
             },
         })
+    }
+
+    /// Admin: Update platform setting
+    async fn admin_update_setting(
+        &self,
+        ctx: &Context<'_>,
+        key: String,
+        value: String,
+    ) -> Result<SettingEntry> {
+        let pool = ctx.data::<DbPool>()?;
+        auth_guard::require_permission_user(ctx, pool, "admin.settings.update").await?;
+        match pool {
+            DbPool::Postgres(p) => {
+                sqlx::query("INSERT INTO platform_settings (key, value, updated_at) VALUES ($1, $2, NOW()) ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()")
+                    .bind(&key).bind(&value).execute(p).await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(SettingEntry { key, value, updated_at: Utc::now().to_rfc3339() })
+            }
+            DbPool::Mysql(_) => Err(async_graphql::Error::new("Not supported")),
+        }
     }
 
     /// Request password reset (public endpoint)
@@ -951,6 +989,13 @@ pub struct AdminReportEntry {
     pub status: String,
     pub created_at: String,
     pub reporter_name: String,
+}
+
+#[derive(SimpleObject, Debug)]
+pub struct SettingEntry {
+    pub key: String,
+    pub value: String,
+    pub updated_at: String,
 }
 
 #[derive(SimpleObject, Debug)]
