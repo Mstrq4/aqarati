@@ -1,0 +1,19 @@
+[Unit]
+Description=Aqarati Backend API (Rust/GraphQL)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/aqarati/backend
+ExecStart=/home/ubuntu/aqarati/backend/target/release/aqarati-backend
+Restart=always
+RestartSec=5
+EnvironmentFile=/home/ubuntu/aqarati/backend/.env
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=aqarati-backend
+
+[Install]
+WantedBy=multi-user.target

@@ -2,30 +2,56 @@ import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import { useTheme } from '../hooks/useTheme';
 import { useTranslation } from 'react-i18next';
+import { Sun, Moon } from 'lucide-react';
 
 export default function Layout() {
-  const { toggleLanguage } = useTheme();
+  const { isDark, toggleTheme, toggleLanguage, dir } = useTheme();
   const { t } = useTranslation();
 
   return (
-    <div className="flex h-screen bg-[#020907] overflow-hidden">
+    <div
+      className="flex h-screen overflow-hidden"
+      style={{ backgroundColor: 'var(--aq-bg)' }}
+    >
       <Sidebar />
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="h-14 border-b border-[#1e3028] bg-[#020907]/80 backdrop-blur-sm flex items-center justify-between px-6 shrink-0">
+        <header
+          className="h-14 border-b flex items-center justify-between px-6 shrink-0 backdrop-blur-sm"
+          style={{
+            backgroundColor: 'var(--aq-topbar-bg)',
+            borderColor: 'var(--aq-topbar-border)',
+          }}
+        >
           <div>
-            <h2 className="text-sm text-white/50 font-medium">
+            <h2
+              className="text-sm font-medium"
+              style={{ color: 'var(--aq-text-muted)' }}
+            >
               {t('admin.dashboard')}
             </h2>
           </div>
           <div className="flex items-center gap-3">
+            {/* Theme toggle */}
             <button
-              onClick={toggleLanguage}
-              className="btn-secondary text-xs"
+              onClick={toggleTheme}
+              className="btn-secondary text-xs flex items-center gap-1"
+              title={isDark ? t('theme.light_mode') : t('theme.dark_mode')}
             >
+              {isDark ? <Sun size={14} /> : <Moon size={14} />}
+            </button>
+            {/* Language toggle */}
+            <button onClick={toggleLanguage} className="btn-secondary text-xs">
               {t('common.language_name')}
             </button>
-            <div className="w-8 h-8 rounded-full bg-[#14b8a6]/20 flex items-center justify-center text-sm font-bold text-[#14b8a6]">
+            {/* Avatar */}
+            <div
+              className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold"
+              style={{
+                backgroundColor: 'var(--aq-brand-muted)',
+                color: 'var(--aq-brand)',
+              }}
+            >
               A
             </div>
           </div>

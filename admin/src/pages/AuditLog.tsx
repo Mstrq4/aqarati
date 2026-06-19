@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchAuditLogs } from '../api/client';
-import type { AdminAuditLog } from '@aqarati/shared';
+import type { AdminAuditLog } from '../shared';
 
 export default function AuditLog() {
   const { t } = useTranslation();

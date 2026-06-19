@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchReports, updateReportStatus } from '../api/client';
 import { Eye, CheckCircle, XCircle, Clock, Search } from 'lucide-react';
-import type { Report } from '@aqarati/shared';
+import type { Report } from '../shared';
 
 interface ReportFull extends Report {
   reporter_name: string;

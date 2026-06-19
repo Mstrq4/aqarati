@@ -6,6 +6,16 @@ use chrono::{Utc, DateTime};
 use serde::{Serialize, Deserialize};
 
 use crate::db::DbPool;
+use crate::services::auth::AuthService;
+use crate::api::guards::auth_guard;
+use crate::api::admin_plans::{
+    AdminPlanFilter, CreatePlanInput, UpdatePlanInput,
+    CreatePlanFeatureInput, UpdatePlanFeatureInput,
+    PlanDetailResponse, PlanFeatureResponse,
+};
+use crate::config::Config;
+use sqlx::types::Json;
+use sqlx::Row;
 
 // ─── Query Root ──────────────────────────────────────────
 
@@ -22,20 +32,30 @@ impl Query {
     /// Get current user profile
     async fn me(&self, ctx: &Context<'_>) -> Result<UserResponse> {
         let pool = ctx.data::<DbPool>()?;
-        let user_id = ctx.data_opt::<Uuid>().cloned();
+        let cfg = ctx.data::<Config>()?;
 
-        // For now return demo user — will be replaced with JWT auth
-        Ok(UserResponse {
-            id: ID::from(user_id.unwrap_or_else(Uuid::new_v4).to_string()),
-            email: Some("demo@aqarati.app".to_string()),
-            phone: Some("+966500000000".to_string()),
-            full_name: "مستخدم تجريبي".to_string(),
-            language: "ar".to_string(),
-            status: "active".to_string(),
-        })
+        // Extract user ID from JWT in auth header
+        if let Some(user_id) = ctx.data_opt::<uuid::Uuid>().cloned() {
+            if let Some(user_result) = AuthService::get_user_by_id(pool, user_id)
+                .await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?
+            {
+                return Ok(UserResponse {
+                    id: ID::from(user_result.user_id.to_string()),
+                    email: user_result.email,
+                    phone: user_result.phone,
+                    full_name: user_result.full_name,
+                    language: user_result.language,
+                    status: user_result.status,
+                });
+            }
+        }
+
+        // No auth — return unauthenticated
+        Err(async_graphql::Error::new("Not authenticated"))
     }
 
-    /// List properties for current user
+    /// List properties for current user (real DB query)
     async fn my_properties(
         &self,
         ctx: &Context<'_>,
@@ -43,22 +63,68 @@ impl Query {
         #[graphql(default = 0)] offset: i32,
     ) -> Result<Vec<PropertyResponse>> {
         let pool = ctx.data::<DbPool>()?;
-        // TODO: Implement with real DB query
-        Ok(vec![])
+        let user_id = auth_guard::require_auth(ctx)?;
+
+        let properties = crate::services::property::PropertyService::list_by_user(
+            pool, user_id, limit, offset,
+        )
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+        Ok(properties
+            .into_iter()
+            .map(|p| PropertyResponse {
+                id: ID::from(p.id.to_string()),
+                title: p.title,
+                property_type: p.property_type,
+                purpose: p.purpose,
+                price_amount: p.price_amount,
+                city: p.city.unwrap_or_default(),
+                status: p.status,
+                created_at: p.created_at.to_rfc3339(),
+                updated_at: Some(p.updated_at.to_rfc3339()),
+                main_image_url: p.main_image_url,
+                area_sqm: p.area_sqm,
+                bedrooms: p.bedrooms,
+                bathrooms: p.bathrooms,
+            })
+            .collect())
     }
 
-    /// Get single property by ID
+    /// Get single property by ID (real DB query with authorization)
     async fn property(
         &self,
         ctx: &Context<'_>,
         id: ID,
     ) -> Result<Option<PropertyResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        // TODO: Implement authorization check + DB query
-        Ok(None)
+        let pool = ctx.data::<DbPool>()?;
+        let user_id = auth_guard::require_auth(ctx)?;
+
+        let pid = uuid::Uuid::parse_str(&id.to_string())
+            .map_err(|_| async_graphql::Error::new("Invalid property ID"))?;
+
+        match crate::services::property::PropertyService::get_by_id(pool, pid, Some(user_id)).await {
+            Ok(p) => Ok(Some(PropertyResponse {
+                id: ID::from(p.id.to_string()),
+                title: p.title,
+                property_type: p.property_type,
+                purpose: p.purpose,
+                price_amount: p.price_amount,
+                city: p.city.unwrap_or_default(),
+                status: p.status,
+                created_at: p.created_at.to_rfc3339(),
+                updated_at: Some(p.updated_at.to_rfc3339()),
+                main_image_url: p.main_image_url,
+                area_sqm: p.area_sqm,
+                bedrooms: p.bedrooms,
+                bathrooms: p.bathrooms,
+            })),
+            Err(e) if e.contains("not found") => Ok(None),
+            Err(e) => Err(async_graphql::Error::new(e)),
+        }
     }
 
-    /// Search properties
+    /// Search properties (real full-text search)
     async fn search_properties(
         &self,
         ctx: &Context<'_>,
@@ -66,41 +132,243 @@ impl Query {
         #[graphql(default = 20)] limit: i32,
         #[graphql(default = 0)] offset: i32,
     ) -> Result<Vec<PropertyResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        // TODO: Implement full-text search + filters
-        Ok(vec![])
+        let pool = ctx.data::<DbPool>()?;
+        let _user_id = auth_guard::require_auth(ctx)?;
+
+        let filters = crate::services::search::SearchFilters {
+            query: input.query,
+            city: input.city,
+            property_type: input.property_type,
+            purpose: input.purpose,
+            min_price: input.min_price,
+            max_price: input.max_price,
+            min_area: input.min_area,
+            max_area: input.max_area,
+            bedrooms: input.bedrooms,
+        };
+
+        let results = crate::services::search::SearchService::search(
+            pool, filters, limit, offset,
+        )
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+        Ok(results.into_iter().map(|p| PropertyResponse {
+            id: ID::from(p.id.to_string()),
+            title: p.title,
+            property_type: p.property_type,
+            purpose: p.purpose,
+            price_amount: p.price_amount,
+            city: p.city.unwrap_or_default(),
+            status: p.status,
+            created_at: p.created_at,
+            updated_at: None,
+            main_image_url: p.main_image_url,
+            area_sqm: p.area_sqm,
+            bedrooms: p.bedrooms,
+            bathrooms: p.bathrooms,
+        }).collect())
     }
 
-    /// Get plans
-    async fn plans(&self, ctx: &Context<'_>) -> Result<Vec<PlanResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        // Return demo plans
-        Ok(vec![
-            PlanResponse {
-                id: ID::from("free"),
-                name: "مجاني".to_string(),
-                tier: "free".to_string(),
-                price_monthly_sar: 0.0,
-                max_properties: 10,
-                max_images_per_property: 5,
-                ai_enabled: false,
-                export_enabled: false,
-                features: vec!["إضافة عقارات".to_string(), "مشاركة واتساب".to_string()],
-                is_active: true,
+    /// Admin: Dashboard statistics (real DB query)
+    async fn admin_dashboard(&self, ctx: &Context<'_>) -> Result<DashboardStats> {
+        let pool = ctx.data::<DbPool>()?;
+        auth_guard::require_admin_user(ctx, pool).await?;
+
+        let (users, properties, orgs) = tokio::join!(
+            async {
+                match pool {
+                    DbPool::Postgres(p) => sqlx::query_scalar::<_, i64>(
+                        "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL"
+                    ).fetch_one(p).await.unwrap_or(0),
+                    DbPool::Mysql(p) => sqlx::query_scalar::<_, i64>(
+                        "SELECT COUNT(*) FROM users WHERE deleted_at IS NULL"
+                    ).fetch_one(p).await.unwrap_or(0),
+                }
             },
-            PlanResponse {
-                id: ID::from("pro"),
-                name: "احترافي".to_string(),
-                tier: "pro".to_string(),
-                price_monthly_sar: 49.0,
-                max_properties: 100,
-                max_images_per_property: 20,
-                ai_enabled: true,
-                export_enabled: true,
-                features: vec!["كل مميزات المجاني".to_string(), "AI".to_string(), "تصدير".to_string()],
-                is_active: true,
+            async {
+                match pool {
+                    DbPool::Postgres(p) => sqlx::query_scalar::<_, i64>(
+                        "SELECT COUNT(*) FROM properties WHERE deleted_at IS NULL"
+                    ).fetch_one(p).await.unwrap_or(0),
+                    DbPool::Mysql(p) => sqlx::query_scalar::<_, i64>(
+                        "SELECT COUNT(*) FROM properties WHERE deleted_at IS NULL"
+                    ).fetch_one(p).await.unwrap_or(0),
+                }
             },
-        ])
+            async {
+                match pool {
+                    DbPool::Postgres(p) => sqlx::query_scalar::<_, i64>(
+                        "SELECT COUNT(*) FROM organizations"
+                    ).fetch_one(p).await.unwrap_or(0),
+                    DbPool::Mysql(p) => sqlx::query_scalar::<_, i64>(
+                        "SELECT COUNT(*) FROM organizations"
+                    ).fetch_one(p).await.unwrap_or(0),
+                }
+            },
+        );
+
+        Ok(DashboardStats {
+            total_users: users as i32,
+            total_properties: properties as i32,
+            total_organizations: orgs as i32,
+            total_revenue_sar: 0.0,
+            active_subscriptions: 0,
+            pending_reports: 0,
+        })
+    }
+
+    /// Admin: Audit log entries
+    async fn admin_audit_log(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(default = 20)] limit: i32,
+        #[graphql(default = 0)] offset: i32,
+    ) -> Result<Vec<AuditLogEntry>> {
+        let pool = ctx.data::<DbPool>()?;
+        auth_guard::require_admin_user(ctx, pool).await?;
+
+        match pool {
+            DbPool::Postgres(p) => {
+                let rows = sqlx::query(
+                    "SELECT id, admin_id, action, target_type, target_id, details, created_at \
+                     FROM admin_audit_logs ORDER BY created_at DESC LIMIT $1 OFFSET $2"
+                ).bind(limit).bind(offset).fetch_all(p).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+                Ok(rows.iter().map(|r| AuditLogEntry {
+                    id: ID::from(r.try_get::<Uuid, _>("id").unwrap_or_default().to_string()),
+                    admin_id: ID::from(r.try_get::<Uuid, _>("admin_id").unwrap_or_default().to_string()),
+                    action: r.try_get("action").unwrap_or_default(),
+                    target_type: r.try_get("target_type").unwrap_or_default(),
+                    target_id: r.try_get::<Option<Uuid>, _>("target_id").ok().flatten().map(|u| ID::from(u.to_string())),
+                    details: r.try_get::<Option<serde_json::Value>, _>("details").ok().flatten().map(|v| v.to_string()),
+                    created_at: r.try_get::<DateTime<Utc>, _>("created_at").map(|d| d.to_rfc3339()).unwrap_or_default(),
+                }).collect())
+            }
+            DbPool::Mysql(_) => Ok(vec![]),
+        }
+    }
+
+    /// Admin: List all properties
+    async fn admin_properties(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(default = 20)] limit: i32,
+        #[graphql(default = 0)] offset: i32,
+    ) -> Result<Vec<AdminPropertyEntry>> {
+        let pool = ctx.data::<DbPool>()?;
+        auth_guard::require_admin_user(ctx, pool).await?;
+        match pool {
+            DbPool::Postgres(p) => {
+                let rows = sqlx::query(
+                    "SELECT p.id, p.title, p.property_type, p.purpose, p.status, p.visibility, p.created_at, \
+                     pp.price_amount, u.email as owner_name \
+                     FROM properties p \
+                     LEFT JOIN LATERAL (SELECT price_amount FROM property_prices WHERE property_id = p.id ORDER BY valid_from DESC LIMIT 1) pp ON true \
+                     JOIN users u ON p.owner_user_id = u.id \
+                     WHERE p.deleted_at IS NULL ORDER BY p.created_at DESC LIMIT $1 OFFSET $2"
+                ).bind(limit).bind(offset).fetch_all(p).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(rows.iter().map(|r| AdminPropertyEntry {
+                    id: ID::from(r.try_get::<Uuid, _>("id").unwrap_or_default().to_string()),
+                    title: r.try_get("title").unwrap_or_default(),
+                    property_type: r.try_get("property_type").unwrap_or_default(),
+                    purpose: r.try_get("purpose").unwrap_or_default(),
+                    price_amount: r.try_get("price_amount").ok(),
+                    city: String::new(),
+                    status: r.try_get("status").unwrap_or_default(),
+                    visibility: r.try_get("visibility").unwrap_or_default(),
+                    created_at: r.try_get::<DateTime<Utc>, _>("created_at").map(|d| d.to_rfc3339()).unwrap_or_default(),
+                    owner_name: r.try_get("owner_name").unwrap_or_default(),
+                }).collect())
+            }
+            DbPool::Mysql(_) => Ok(vec![]),
+        }
+    }
+
+    /// Admin: List organizations
+    async fn admin_organizations(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(default = 20)] limit: i32,
+        #[graphql(default = 0)] offset: i32,
+    ) -> Result<Vec<AdminOrgEntry>> {
+        let pool = ctx.data::<DbPool>()?;
+        auth_guard::require_admin_user(ctx, pool).await?;
+        match pool {
+            DbPool::Postgres(p) => {
+                let rows = sqlx::query(
+                    "SELECT o.id, o.name, o.status, o.created_at, \
+                     COUNT(om.user_id) as member_count, u.email as owner_name \
+                     FROM organizations o \
+                     LEFT JOIN organization_members om ON o.id = om.organization_id \
+                     JOIN users u ON o.owner_user_id = u.id \
+                     GROUP BY o.id, u.email ORDER BY o.created_at DESC LIMIT $1 OFFSET $2"
+                ).bind(limit).bind(offset).fetch_all(p).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(rows.iter().map(|r| AdminOrgEntry {
+                    id: ID::from(r.try_get::<Uuid, _>("id").unwrap_or_default().to_string()),
+                    name: r.try_get("name").unwrap_or_default(),
+                    status: r.try_get("status").unwrap_or_default(),
+                    created_at: r.try_get::<DateTime<Utc>, _>("created_at").map(|d| d.to_rfc3339()).unwrap_or_default(),
+                    member_count: r.try_get::<i64, _>("member_count").unwrap_or(0) as i32,
+                    owner_name: r.try_get("owner_name").unwrap_or_default(),
+                }).collect())
+            }
+            DbPool::Mysql(_) => Ok(vec![]),
+        }
+    }
+
+    /// Admin: List reports
+    async fn admin_reports(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(default = 20)] limit: i32,
+        #[graphql(default = 0)] offset: i32,
+    ) -> Result<Vec<AdminReportEntry>> {
+        let pool = ctx.data::<DbPool>()?;
+        auth_guard::require_admin_user(ctx, pool).await?;
+        match pool {
+            DbPool::Postgres(p) => {
+                let rows = sqlx::query(
+                    "SELECT r.id, r.reason, r.description, r.status, r.created_at, u.email as reporter_name \
+                     FROM reports r JOIN users u ON r.reporter_id = u.id \
+                     ORDER BY r.created_at DESC LIMIT $1 OFFSET $2"
+                ).bind(limit).bind(offset).fetch_all(p).await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+                Ok(rows.iter().map(|r| AdminReportEntry {
+                    id: ID::from(r.try_get::<Uuid, _>("id").unwrap_or_default().to_string()),
+                    reason: r.try_get("reason").unwrap_or_default(),
+                    description: r.try_get("description").ok(),
+                    status: r.try_get("status").unwrap_or_default(),
+                    created_at: r.try_get::<DateTime<Utc>, _>("created_at").map(|d| d.to_rfc3339()).unwrap_or_default(),
+                    reporter_name: r.try_get("reporter_name").unwrap_or_default(),
+                }).collect())
+            }
+            DbPool::Mysql(_) => Ok(vec![]),
+        }
+    }
+
+    /// Get plans from database (public — only active/public plans)
+    async fn public_plans(&self, ctx: &Context<'_>) -> Result<Vec<PlanDetailResponse>> {
+        crate::api::admin_plans::public_plans(ctx).await
+    }
+
+    /// Admin: List all plans with filters
+    async fn admin_plans(
+        &self,
+        ctx: &Context<'_>,
+        filter: Option<AdminPlanFilter>,
+        #[graphql(default = 50)] limit: i32,
+        #[graphql(default = 0)] offset: i32,
+    ) -> Result<Vec<PlanDetailResponse>> {
+        crate::api::admin_plans::admin_plans(ctx, filter, limit, offset).await
+    }
+
+    /// Admin: Get single plan by ID
+    async fn admin_plan(&self, ctx: &Context<'_>, id: ID) -> Result<Option<PlanDetailResponse>> {
+        crate::api::admin_plans::admin_plan(ctx, id).await
     }
 
     /// Get organizations for current user
@@ -133,37 +401,52 @@ impl Query {
         Ok(None)
     }
 
-    /// Admin: List all users
+    /// Admin: List all users (real DB query, safe fields, RBAC-protected)
     async fn admin_users(
         &self,
         ctx: &Context<'_>,
         #[graphql(default = 20)] limit: i32,
         #[graphql(default = 0)] offset: i32,
     ) -> Result<Vec<UserResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        // TODO: Admin only check
-        Ok(vec![])
+        let pool = ctx.data::<DbPool>()?;
+        auth_guard::require_admin_user(ctx, pool).await?;
+
+        let users = AuthService::list_users(pool, limit, offset)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+        Ok(users
+            .into_iter()
+            .map(|u| UserResponse {
+                id: ID::from(u.user_id.to_string()),
+                email: u.email,
+                phone: u.phone,
+                full_name: u.full_name,
+                language: u.language,
+                status: u.status,
+            })
+            .collect())
     }
 
-    /// Admin: List payment providers
+    /// Admin: List payment providers (real DB query)
     async fn payment_providers(&self, ctx: &Context<'_>) -> Result<Vec<PaymentProviderResponse>> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(vec![
-            PaymentProviderResponse {
-                id: ID::from("mada"),
-                provider_key: "mada".to_string(),
-                display_name: "مدى".to_string(),
-                is_enabled: true,
-                supported_methods: vec!["card".to_string(), "apple_pay".to_string()],
-            },
-            PaymentProviderResponse {
-                id: ID::from("stc_pay"),
-                provider_key: "stc_pay".to_string(),
-                display_name: "STC Pay".to_string(),
-                is_enabled: true,
-                supported_methods: vec!["wallet".to_string(), "card".to_string()],
-            },
-        ])
+        let pool = ctx.data::<DbPool>()?;
+        auth_guard::require_admin_user(ctx, pool).await?;
+
+        let providers = crate::services::payment_provider::PaymentProviderService::list_all(pool)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+        Ok(providers
+            .into_iter()
+            .map(|p| PaymentProviderResponse {
+                id: ID::from(p.id.to_string()),
+                provider_key: p.provider_key,
+                display_name: p.display_name,
+                is_enabled: p.is_enabled,
+                supported_methods: p.supported_methods,
+            })
+            .collect())
     }
 
     /// Get ratings for a property
@@ -190,17 +473,29 @@ impl Mutation {
         ctx: &Context<'_>,
         input: RegisterInput,
     ) -> Result<AuthPayload> {
-        let _pool = ctx.data::<DbPool>()?;
-        // TODO: Hash password, insert user, return JWT
+        let pool = ctx.data::<DbPool>()?;
+        let cfg = ctx.data::<Config>()?;
+
+        let result = AuthService::register(
+            pool, cfg,
+            &input.email,
+            &input.password,
+            &input.full_name,
+            input.phone.as_deref(),
+            input.language.as_deref(),
+        )
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
         Ok(AuthPayload {
-            token: "demo_token_placeholder".to_string(),
+            token: result.token,
             user: UserResponse {
-                id: ID::from(Uuid::new_v4().to_string()),
-                email: Some(input.email),
-                phone: input.phone,
-                full_name: input.full_name,
-                language: input.language.unwrap_or_else(|| "ar".to_string()),
-                status: "active".to_string(),
+                id: ID::from(result.user_id.to_string()),
+                email: result.email,
+                phone: result.phone,
+                full_name: result.full_name,
+                language: result.language,
+                status: result.status,
             },
         })
     }
@@ -212,62 +507,132 @@ impl Mutation {
         email: String,
         password: String,
     ) -> Result<AuthPayload> {
-        let _pool = ctx.data::<DbPool>()?;
-        // TODO: Verify credentials, return JWT
+        let pool = ctx.data::<DbPool>()?;
+        let cfg = ctx.data::<Config>()?;
+
+        let result = AuthService::login(pool, cfg, &email, &password)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
         Ok(AuthPayload {
-            token: "demo_token_placeholder".to_string(),
+            token: result.token,
             user: UserResponse {
-                id: ID::from(Uuid::new_v4().to_string()),
-                email: Some(email),
-                phone: Some("+966500000000".to_string()),
-                full_name: "مستخدم تجريبي".to_string(),
-                language: "ar".to_string(),
-                status: "active".to_string(),
+                id: ID::from(result.user_id.to_string()),
+                email: result.email,
+                phone: result.phone,
+                full_name: result.full_name,
+                language: result.language,
+                status: result.status,
             },
         })
     }
 
-    /// Create a property
+    /// Create a property (real DB insert)
     async fn create_property(
         &self,
         ctx: &Context<'_>,
         input: CreatePropertyInput,
     ) -> Result<PropertyResponse> {
-        let _pool = ctx.data::<DbPool>()?;
-        // TODO: Validate, insert into DB, return
+        let pool = ctx.data::<DbPool>()?;
+        let user_id = auth_guard::require_auth(ctx)?;
+
+        let property = crate::services::property::PropertyService::create(
+            pool,
+            user_id,
+            &input.title,
+            &input.property_type,
+            &input.purpose,
+            input.description.as_deref(),
+            input.city.as_deref(),
+            None, // district
+            input.area_sqm,
+            input.bedrooms,
+            input.bathrooms,
+            input.price_amount,
+            input.visibility.as_deref(),
+            None, // organization_id
+            &input.owner_phone,
+        )
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
         Ok(PropertyResponse {
-            id: ID::from(Uuid::new_v4().to_string()),
-            title: input.title,
-            property_type: input.property_type,
-            purpose: input.purpose,
-            price_amount: input.price_amount,
-            city: input.city.unwrap_or_default(),
-            status: "draft".to_string(),
-            created_at: Utc::now().to_rfc3339(),
-            ..Default::default()
+            id: ID::from(property.id.to_string()),
+            title: property.title,
+            property_type: property.property_type,
+            purpose: property.purpose,
+            price_amount: property.price_amount,
+            city: property.city.unwrap_or_default(),
+            status: property.status,
+            created_at: property.created_at.to_rfc3339(),
+            updated_at: Some(property.updated_at.to_rfc3339()),
+            main_image_url: property.main_image_url,
+            area_sqm: property.area_sqm,
+            bedrooms: property.bedrooms,
+            bathrooms: property.bathrooms,
         })
     }
 
-    /// Update a property
+    /// Update a property (real DB update with authorization)
     async fn update_property(
         &self,
         ctx: &Context<'_>,
         id: ID,
         input: UpdatePropertyInput,
     ) -> Result<PropertyResponse> {
-        let _pool = ctx.data::<DbPool>()?;
-        // TODO: Authorization check + update
+        let pool = ctx.data::<DbPool>()?;
+        let user_id = auth_guard::require_auth(ctx)?;
+
+        let pid = uuid::Uuid::parse_str(&id.to_string())
+            .map_err(|_| async_graphql::Error::new("Invalid property ID"))?;
+
+        let property = crate::services::property::PropertyService::update(
+            pool,
+            pid,
+            user_id,
+            input.title.as_deref(),
+            input.property_type.as_deref(),
+            input.purpose.as_deref(),
+            input.description.as_deref(),
+            input.city.as_deref(),
+            input.status.as_deref(),
+            input.visibility.as_deref(),
+            None, // area_sqm
+            None, // bedrooms
+            None, // bathrooms
+            input.price_amount,
+        )
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
         Ok(PropertyResponse {
-            id,
-            title: input.title.unwrap_or_default(),
-            ..Default::default()
+            id: ID::from(property.id.to_string()),
+            title: property.title,
+            property_type: property.property_type,
+            purpose: property.purpose,
+            price_amount: property.price_amount,
+            city: property.city.unwrap_or_default(),
+            status: property.status,
+            created_at: property.created_at.to_rfc3339(),
+            updated_at: Some(property.updated_at.to_rfc3339()),
+            main_image_url: property.main_image_url,
+            area_sqm: property.area_sqm,
+            bedrooms: property.bedrooms,
+            bathrooms: property.bathrooms,
         })
     }
 
-    /// Delete a property (soft delete)
+    /// Delete a property (soft delete with authorization)
     async fn delete_property(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(true)
+        let pool = ctx.data::<DbPool>()?;
+        let user_id = auth_guard::require_auth(ctx)?;
+
+        let pid = uuid::Uuid::parse_str(&id.to_string())
+            .map_err(|_| async_graphql::Error::new("Invalid property ID"))?;
+
+        crate::services::property::PropertyService::delete(pool, pid, user_id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))
     }
 
     /// Share a property (log event)
@@ -330,49 +695,117 @@ impl Mutation {
         })
     }
 
-    // ─── Admin Mutations ──────────────────────────────────
+    // ─── Admin Plan Mutations ────────────────────────────
 
-    /// Admin: Create/update plan
-    async fn admin_upsert_plan(
+    /// Admin: Create a plan
+    async fn admin_create_plan(
         &self,
         ctx: &Context<'_>,
-        input: PlanInput,
-    ) -> Result<PlanResponse> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(PlanResponse {
-            id: ID::from(input.id.unwrap_or_else(|| Uuid::new_v4().to_string())),
-            name: input.name,
-            tier: input.tier,
-            price_monthly_sar: input.price_monthly_sar,
-            max_properties: input.max_properties,
-            max_images_per_property: input.max_images_per_property,
-            ai_enabled: input.ai_enabled,
-            export_enabled: input.export_enabled,
-            features: input.features,
-            is_active: input.is_active,
-        })
+        input: CreatePlanInput,
+    ) -> Result<PlanDetailResponse> {
+        crate::api::admin_plans::admin_create_plan(ctx, input).await
     }
 
-    /// Admin: Delete plan
+    /// Admin: Update a plan
+    async fn admin_update_plan(
+        &self,
+        ctx: &Context<'_>,
+        id: ID,
+        input: UpdatePlanInput,
+    ) -> Result<PlanDetailResponse> {
+        crate::api::admin_plans::admin_update_plan(ctx, id, input).await
+    }
+
+    /// Admin: Archive plan (soft-delete)
+    async fn admin_archive_plan(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
+        crate::api::admin_plans::admin_archive_plan(ctx, id).await
+    }
+
+    /// Admin: Delete plan (fails if active subscribers)
     async fn admin_delete_plan(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(true)
+        crate::api::admin_plans::admin_delete_plan(ctx, id).await
     }
 
-    /// Admin: Toggle payment provider
+    /// Admin: Set plan featured
+    async fn admin_set_plan_featured(&self, ctx: &Context<'_>, id: ID, featured: bool) -> Result<PlanDetailResponse> {
+        crate::api::admin_plans::admin_set_plan_featured(ctx, id, featured).await
+    }
+
+    /// Admin: Set plan popular
+    async fn admin_set_plan_popular(&self, ctx: &Context<'_>, id: ID, popular: bool) -> Result<PlanDetailResponse> {
+        crate::api::admin_plans::admin_set_plan_popular(ctx, id, popular).await
+    }
+
+    /// Admin: Set plan recommended
+    async fn admin_set_plan_recommended(&self, ctx: &Context<'_>, id: ID, recommended: bool) -> Result<PlanDetailResponse> {
+        crate::api::admin_plans::admin_set_plan_recommended(ctx, id, recommended).await
+    }
+
+    /// Admin: Set plan visibility
+    async fn admin_set_plan_visibility(&self, ctx: &Context<'_>, id: ID, visibility: String) -> Result<PlanDetailResponse> {
+        crate::api::admin_plans::admin_set_plan_visibility(ctx, id, visibility).await
+    }
+
+    /// Admin: Reorder plans
+    async fn admin_reorder_plans(&self, ctx: &Context<'_>, plan_ids: Vec<ID>) -> Result<bool> {
+        crate::api::admin_plans::admin_reorder_plans(ctx, plan_ids).await
+    }
+
+    /// Admin: Create plan feature
+    async fn admin_create_plan_feature(&self, ctx: &Context<'_>, input: CreatePlanFeatureInput) -> Result<PlanFeatureResponse> {
+        crate::api::admin_plans::admin_create_plan_feature(ctx, input).await
+    }
+
+    /// Admin: Update plan feature
+    async fn admin_update_plan_feature(&self, ctx: &Context<'_>, id: ID, input: UpdatePlanFeatureInput) -> Result<PlanFeatureResponse> {
+        crate::api::admin_plans::admin_update_plan_feature(ctx, id, input).await
+    }
+
+    /// Admin: Delete plan feature
+    async fn admin_delete_plan_feature(&self, ctx: &Context<'_>, id: ID) -> Result<bool> {
+        crate::api::admin_plans::admin_delete_plan_feature(ctx, id).await
+    }
+
+    /// Admin: Toggle payment provider (real DB toggle)
     async fn admin_toggle_payment_provider(
         &self,
         ctx: &Context<'_>,
         provider_key: String,
         is_enabled: bool,
     ) -> Result<PaymentProviderResponse> {
-        let _pool = ctx.data::<DbPool>()?;
-        Ok(PaymentProviderResponse {
-            id: ID::from(provider_key.clone()),
-            provider_key,
-            display_name: "Provider".to_string(),
+        let pool = ctx.data::<DbPool>()?;
+        auth_guard::require_permission_user(ctx, pool, "admin.payment_providers.manage").await?;
+
+        let updated = crate::services::payment_provider::PaymentProviderService::toggle(
+            pool,
+            &provider_key,
             is_enabled,
-            supported_methods: vec![],
+        )
+        .await
+        .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+        if !updated {
+            return Err(async_graphql::Error::new(format!(
+                "Payment provider '{}' not found", provider_key
+            )));
+        }
+
+        // Re-fetch to return full updated record
+        let providers = crate::services::payment_provider::PaymentProviderService::list_all(pool)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+        let provider = providers
+            .into_iter()
+            .find(|p| p.provider_key == provider_key)
+            .ok_or_else(|| async_graphql::Error::new("Provider disappeared after toggle"))?;
+
+        Ok(PaymentProviderResponse {
+            id: ID::from(provider.id.to_string()),
+            provider_key: provider.provider_key,
+            display_name: provider.display_name,
+            is_enabled: provider.is_enabled,
+            supported_methods: provider.supported_methods,
         })
     }
 }
@@ -421,6 +854,15 @@ pub struct PlanResponse {
 }
 
 #[derive(SimpleObject, Debug)]
+pub struct DashboardStats {
+    pub total_users: i32,
+    pub total_properties: i32,
+    pub total_organizations: i32,
+    pub total_revenue_sar: f64,
+    pub active_subscriptions: i32,
+    pub pending_reports: i32,
+}
+#[derive(SimpleObject, Debug)]
 pub struct OrganizationResponse {
     pub id: ID,
     pub name: String,
@@ -437,6 +879,51 @@ pub struct ContactResponse {
     pub email: Option<String>,
     #[graphql(name = "type")]
     pub contact_type: String,
+}
+
+#[derive(SimpleObject, Debug)]
+pub struct AuditLogEntry {
+    pub id: ID,
+    pub admin_id: ID,
+    pub action: String,
+    pub target_type: String,
+    pub target_id: Option<ID>,
+    pub details: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(SimpleObject, Debug)]
+pub struct AdminPropertyEntry {
+    pub id: ID,
+    pub title: String,
+    pub property_type: String,
+    pub purpose: String,
+    pub price_amount: Option<f64>,
+    pub city: String,
+    pub status: String,
+    pub visibility: String,
+    pub created_at: String,
+    pub owner_name: String,
+}
+
+#[derive(SimpleObject, Debug)]
+pub struct AdminOrgEntry {
+    pub id: ID,
+    pub name: String,
+    pub status: String,
+    pub created_at: String,
+    pub member_count: i32,
+    pub owner_name: String,
+}
+
+#[derive(SimpleObject, Debug)]
+pub struct AdminReportEntry {
+    pub id: ID,
+    pub reason: String,
+    pub description: Option<String>,
+    pub status: String,
+    pub created_at: String,
+    pub reporter_name: String,
 }
 
 #[derive(SimpleObject, Debug)]

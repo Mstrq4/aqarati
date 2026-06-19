@@ -2,6 +2,7 @@
 pub mod schema;
 pub mod resolvers;
 pub mod guards;
+pub mod admin_plans;
 
 use actix_web::{web, HttpResponse, get};
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
@@ -29,9 +30,28 @@ async fn graphql_handler(
     schema: web::Data<AppSchema>,
     _pool: web::Data<DbPool>,
     _cfg: web::Data<Config>,
+    http_req: actix_web::HttpRequest,
     req: GraphQLRequest,
 ) -> GraphQLResponse {
-    schema.execute(req.into_inner()).await.into()
+    let mut gql_req = req.into_inner();
+
+    // Extract JWT from Authorization header and inject user_id into context
+    if let Some(auth_header) = http_req.headers().get("Authorization") {
+        if let Ok(auth_str) = auth_header.to_str() {
+            if let Some(token) = auth_str.strip_prefix("Bearer ") {
+                let secret = std::env::var("JWT_SECRET").unwrap_or_default();
+                if !secret.is_empty() {
+                    if let Ok(claims) = crate::services::auth::AuthService::validate_token(token, &secret) {
+                        if let Ok(user_id) = uuid::Uuid::parse_str(&claims.sub) {
+                            gql_req = gql_req.data(user_id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    schema.execute(gql_req).await.into()
 }
 
 /// GraphQL Playground (dev only)

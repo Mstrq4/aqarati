@@ -9,7 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@aqarati/shared": "file:../shared",
+    "@aqarati/shared": "file:./shared",
     "date-fns": "^3.6.0",
     "i18next": "^23.11.5",
     "react": "^18.3.1",

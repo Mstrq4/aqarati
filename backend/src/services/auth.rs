@@ -180,7 +180,7 @@ impl AuthService {
         match pool {
             DbPool::Postgres(p) => {
                 let row = sqlx::query(
-                    "SELECT u.id, u.email, u.phone, u.password_hash, u.status, u.language, up.full_name \
+                    "SELECT u.id, u.email, u.phone, u.password_hash, u.status::text as status, u.language, up.full_name \
                      FROM users u JOIN user_profiles up ON u.id = up.user_id \
                      WHERE u.email = $1 AND u.deleted_at IS NULL"
                 )
@@ -511,6 +511,97 @@ impl AuthService {
                 .await
                 .map_err(|e| format!("Admin check failed: {}", e))?;
                 Ok(row.is_some())
+            }
+        }
+    }
+
+    /// List all users for admin panel (safe fields only, no password_hash)
+    pub async fn list_users(
+        pool: &DbPool,
+        limit: i32,
+        offset: i32,
+    ) -> Result<Vec<AuthResult>, String> {
+        match pool {
+            DbPool::Postgres(p) => {
+                let rows = sqlx::query(
+                    "SELECT u.id, u.email, u.phone, u.status, u.language, up.full_name \
+                     FROM users u \
+                     JOIN user_profiles up ON u.id = up.user_id \
+                     WHERE u.deleted_at IS NULL \
+                     ORDER BY u.created_at DESC \
+                     LIMIT $1 OFFSET $2"
+                )
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("List users query failed: {}", e))?;
+
+                Ok(rows
+                    .iter()
+                    .map(|r| {
+                        let user_id: Uuid = r.try_get("id").unwrap_or_default();
+                        let email: Option<String> = r.try_get("email").ok();
+                        let phone: Option<String> = r.try_get("phone").ok();
+                        let language: String =
+                            r.try_get("language").unwrap_or_else(|_| "ar".to_string());
+                        let full_name: String =
+                            r.try_get("full_name").unwrap_or_else(|_| "User".to_string());
+                        let status: String =
+                            r.try_get("status").unwrap_or_else(|_| "active".to_string());
+                        AuthResult {
+                            token: String::new(),
+                            refresh_token: String::new(),
+                            user_id,
+                            email,
+                            phone,
+                            full_name,
+                            language,
+                            status,
+                        }
+                    })
+                    .collect())
+            }
+            DbPool::Mysql(p) => {
+                let rows = sqlx::query(
+                    "SELECT u.id, u.email, u.phone, u.status, u.language, up.full_name \
+                     FROM users u \
+                     JOIN user_profiles up ON u.id = up.user_id \
+                     WHERE u.deleted_at IS NULL \
+                     ORDER BY u.created_at DESC \
+                     LIMIT ? OFFSET ?"
+                )
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(p)
+                .await
+                .map_err(|e| format!("List users query failed: {}", e))?;
+
+                Ok(rows
+                    .iter()
+                    .map(|r| {
+                        let raw_id: String = r.try_get("id").unwrap_or_default();
+                        let user_id = Uuid::parse_str(&raw_id).unwrap_or_default();
+                        let email: Option<String> = r.try_get("email").ok();
+                        let phone: Option<String> = r.try_get("phone").ok();
+                        let language: String =
+                            r.try_get("language").unwrap_or_else(|_| "ar".to_string());
+                        let full_name: String =
+                            r.try_get("full_name").unwrap_or_else(|_| "User".to_string());
+                        let status: String =
+                            r.try_get("status").unwrap_or_else(|_| "active".to_string());
+                        AuthResult {
+                            token: String::new(),
+                            refresh_token: String::new(),
+                            user_id,
+                            email,
+                            phone,
+                            full_name,
+                            language,
+                            status,
+                        }
+                    })
+                    .collect())
             }
         }
     }

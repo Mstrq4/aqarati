@@ -12,3 +12,4 @@ pub mod report;
 pub mod audit;
 pub mod plan;
 pub mod payment_provider;
+pub mod rbac;

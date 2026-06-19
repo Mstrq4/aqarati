@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchProperties } from '../api/client';
 import { Search } from 'lucide-react';
-import type { Property, PropertyLocation, PropertyDetails, PropertyPrice } from '@aqarati/shared';
+import type { Property, PropertyLocation, PropertyDetails, PropertyPrice } from '../shared';
 
 type PropertyFull = Property & { location: any; details: any; price: any };
 

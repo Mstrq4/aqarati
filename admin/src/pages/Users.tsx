@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { fetchUsers, suspendUser, deleteUser } from '../api/client';
 import { Search, Filter, MoreVertical, Ban, Trash2, CheckCircle } from 'lucide-react';
-import type { User, UserProfile } from '@aqarati/shared';
+import type { User, UserProfile } from '../shared';
 
 type UserWithProfile = User & { profile: UserProfile };
 
