@@ -1,5 +1,5 @@
 // Aqarati Mobile — Property Detail Screen
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   Dimensions,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -18,6 +19,8 @@ import { useTranslation } from 'react-i18next';
 import { spacing, radius } from '../theme';
 import StarRating from '../components/StarRating';
 import WhatsAppShare from '../components/WhatsAppShare';
+import { getProperty } from '../api/client';
+import { getProperty } from '../api/client';
 import { formatPrice, formatDate, MOCK_PROPERTY_IMAGES } from '../utils';
 import type { RootStackParamList } from '../types';
 
@@ -25,32 +28,6 @@ const { width } = Dimensions.get('window');
 const IMG_HEIGHT = 260;
 
 type DetailRoute = RouteProp<RootStackParamList, 'PropertyDetail'>;
-
-// Mock detail based on property id
-const MOCK_DETAIL = {
-  id: 'p-001',
-  title: 'فيلا فاخرة بحي النرجس',
-  description: 'فيلا دورين وملحق بتصميم مودرن، مدخل سيارة واسع، مجلس رجال ومقلط، صالة عائلية كبيرة، مطبخ راكب، 5 غرف نوم ماستر، حديقة خلفية، موقع مميز قريب من الخدمات.',
-  purpose: 'sale' as const,
-  property_type: 'villa',
-  status: 'active' as const,
-  price: 2500000,
-  currency: 'SAR',
-  negotiable: true,
-  area_sqm: 400,
-  bedrooms: 5,
-  bathrooms: 4,
-  street_width: 20,
-  age_years: 3,
-  furnished: false,
-  city: 'الرياض',
-  district: 'حي النرجس',
-  address: 'شارع الأمير محمد بن سلمان',
-  owner_phone: '+966501234567',
-  owner_name: 'محمد العقاري',
-  completeness_score: 85,
-  created_at: '2026-06-15T00:00:00Z',
-};
 
 export default function PropertyDetailScreen() {
   const { theme } = useTheme();
@@ -62,10 +39,45 @@ export default function PropertyDetailScreen() {
   const [currentImage, setCurrentImage] = useState(0);
   const [isFavorite, setIsFavorite] = useState(false);
   const [rating, setRating] = useState(0);
+  const [apiProperty, setApiProperty] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
-  const property = MOCK_DETAIL;
+  useEffect(() => {
+    const id = (route.params as any)?.id;
+    if (id) {
+      getProperty(id)
+        .then((data: any) => setApiProperty(data?.property || null))
+        .catch(() => setApiProperty(null))
+        .finally(() => setLoading(false));
+    } else {
+      setLoading(false);
+    }
+  }, [(route.params as any)?.id]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+        <ActivityIndicator size="large" color="#14b8a6" style={{ marginTop: 100 }} />
+      </SafeAreaView>
+    );
+  }
+
+  const property = apiProperty;
   const images = MOCK_PROPERTY_IMAGES;
   const isRTL = lang === 'ar';
+
+  if (!property) {
+    return (
+      <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <Text style={{ color: '#999', fontSize: 16 }}>العقار غير موجود</Text>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={{ marginTop: 16, padding: 12, backgroundColor: '#14b8a6', borderRadius: 8 }}>
+            <Text style={{ color: '#fff' }}>رجوع</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const statusColors: Record<string, string> = {
     active: '#22c55e',
