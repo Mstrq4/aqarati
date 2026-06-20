@@ -173,6 +173,30 @@ export function isAuthenticated(): boolean {
 
 // ─── Properties ───────────────────────────────────────
 
+export interface CreatePropertyInput {
+  title: string;
+  propertyType: string;
+  purpose: string;
+  priceAmount?: number;
+  city?: string;
+  description?: string;
+  areaSqm?: number;
+  bedrooms?: number;
+  bathrooms?: number;
+  ownerPhone: string;
+  visibility?: string;
+}
+
+export async function createProperty(input: CreatePropertyInput): Promise<PropertyData> {
+  const data = await graphql<{ createProperty: PropertyData }>(
+    `mutation CreateProperty($input: CreatePropertyInput!) {
+      createProperty(input: $input) { id title propertyType purpose status createdAt }
+    }`,
+    { input }
+  );
+  return data.createProperty;
+}
+
 export async function fetchMyProperties(): Promise<PropertyData[]> {
   const data = await graphql<{ myProperties: PropertyData[] }>(
     `query MyProperties { myProperties { id title propertyType purpose priceAmount city status visibility mainImageUrl createdAt } }`
