@@ -123,6 +123,7 @@ export async function login(email: string, password: string): Promise<AuthPayloa
   );
   if (data.login?.token) {
     localStorage.setItem('aq-token', data.login.token);
+    document.cookie = `aq-token=${data.login.token}; path=/; max-age=2592000; SameSite=Lax`;
   }
   return data.login;
 }
@@ -136,6 +137,7 @@ export async function register(email: string, password: string, fullName: string
   );
   if (data.register?.token) {
     localStorage.setItem('aq-token', data.register.token);
+    document.cookie = `aq-token=${data.register.token}; path=/; max-age=2592000; SameSite=Lax`;
   }
   return data.register;
 }
@@ -165,6 +167,7 @@ export async function me(): Promise<UserData | null> {
 
 export function logout(): void {
   localStorage.removeItem('aq-token');
+  document.cookie = 'aq-token=; path=/; max-age=0';
 }
 
 export function isAuthenticated(): boolean {
