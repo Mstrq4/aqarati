@@ -70,6 +70,20 @@ export async function getPublicPlans() {
   return graphql('{ publicPlans { id name nameAr tier description descriptionAr priceMonthlySar maxProperties features isFeatured isPopular badgeLabelAr } }');
 }
 
+// ─── Search ──────────────────────────────────────────────
+
+export async function searchProperties(query?: string, city?: string, propertyType?: string, purpose?: string, minPrice?: number, maxPrice?: number) {
+  const filters: string[] = [];
+  if (query) filters.push(`query: "${query}"`);
+  if (city) filters.push(`city: "${city}"`);
+  if (propertyType) filters.push(`propertyType: "${propertyType}"`);
+  if (purpose) filters.push(`purpose: "${purpose}"`);
+  if (minPrice) filters.push(`minPrice: ${minPrice}`);
+  if (maxPrice) filters.push(`maxPrice: ${maxPrice}`);
+  const filterStr = filters.length > 0 ? `(${filters.join(', ')})` : '';
+  return graphql(`{ searchProperties${filterStr} { id title propertyType purpose status createdAt priceAmount city } }`);
+}
+
 // ─── Password Recovery ───────────────────────────────────
 
 export async function forgotPassword(email: string) {

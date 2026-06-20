@@ -1,5 +1,5 @@
 // Aqarati Mobile — Search / Explore Screen (استكشاف)
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TextInput,
   TouchableOpacity,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
@@ -18,43 +19,12 @@ import { spacing, radius } from '../theme';
 import PropertyCard from '../components/PropertyCard';
 import EmptyState from '../components/EmptyState';
 import FilterChips from '../components/FilterChips';
+import { searchProperties } from '../api/client';
 import { PROPERTY_TYPES, PURPOSES } from '../utils';
 import type { RootStackParamList, Property, PropertyDetails, PropertyPrice } from '../types';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
 
-const MOCK_SEARCH_RESULTS = [
-  {
-    property: {
-      id: 's-001', owner_user_id: 'u-002', visibility: 'public' as const,
-      purpose: 'sale' as const, property_type: 'apartment', title: 'شقة تمليك 4 غرف - حي الياسمين',
-      status: 'active' as const, completeness_score: 90,
-      created_at: '2026-06-14T00:00:00Z', updated_at: '2026-06-14T00:00:00Z',
-    },
-    details: { area_sqm: 200, bedrooms: 4, bathrooms: 3, street_width: 15 } as Partial<PropertyDetails>,
-    price: { price_amount: 1200000, currency: 'SAR', negotiable: false } as Partial<PropertyPrice>,
-  },
-  {
-    property: {
-      id: 's-002', owner_user_id: 'u-003', visibility: 'public' as const,
-      purpose: 'rent' as const, property_type: 'villa', title: 'فيلا للإيجار السنوي - حي الصحافة',
-      status: 'active' as const, completeness_score: 82,
-      created_at: '2026-06-12T00:00:00Z', updated_at: '2026-06-13T00:00:00Z',
-    },
-    details: { area_sqm: 350, bedrooms: 5, bathrooms: 4, furnished: true } as Partial<PropertyDetails>,
-    price: { price_amount: 120000, currency: 'SAR', negotiable: true } as Partial<PropertyPrice>,
-  },
-  {
-    property: {
-      id: 's-003', owner_user_id: 'u-004', visibility: 'public' as const,
-      purpose: 'sale' as const, property_type: 'land', title: 'أرض سكنية - شمال الرياض',
-      status: 'active' as const, completeness_score: 75,
-      created_at: '2026-06-10T00:00:00Z', updated_at: '2026-06-10T00:00:00Z',
-    },
-    details: { area_sqm: 600, street_width: 25 } as Partial<PropertyDetails>,
-    price: { price_amount: 1800000, currency: 'SAR', negotiable: true } as Partial<PropertyPrice>,
-  },
-];
 
 const SORT_OPTIONS = [
   { key: 'newest', label: 'الأحدث' },
@@ -87,7 +57,7 @@ export default function SearchScreen() {
     color: p.color,
   }));
 
-  const filtered = MOCK_SEARCH_RESULTS.filter((item) => {
+  const filtered = searchResults.filter((item) => {
     const q = query.toLowerCase();
     const matchesQuery =
       !q ||
@@ -171,7 +141,7 @@ export default function SearchScreen() {
     </View>
   );
 
-  const renderItem = ({ item }: { item: typeof MOCK_SEARCH_RESULTS[0] }) => (
+  const renderItem = ({ item }: { item: typeof searchResultsULTS[0] }) => (
     <PropertyCard
       property={item.property}
       details={item.details}
